@@ -134,3 +134,13 @@
 "Last Display Mode" = "Modo de visualización anterior";
 
 "Float on Top" = "Colocar en primer plano"; // (same as QuickTime Player → View)
+
+"Fast Forward" = "Avance rápido";
+
+"Fast Forward Speed" = "Velocidad de avance rápido";
+
+"Unlimited" = "Sin límite";
+
+"Mute Sound While Fast-Forwarding" = "Silenciar durante el avance rápido";
+
+"Fast Forward Key Toggles On/Off" = "Alternar avance rápido con la tecla";
