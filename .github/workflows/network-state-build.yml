@@ -1,0 +1,53 @@
+name: Network-state development build
+
+on:
+  push:
+    branches: [support/network-state-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: network-state-development
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Build OpenEmu
+        run: |
+          set -o pipefail
+          xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmu \
+            -configuration Release -sdk macosx -arch x86_64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build.log
+      - name: Test OpenEmuKit
+        run: |
+          set -o pipefail
+          xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmuKit \
+            -configuration Debug -destination 'platform=macOS' -arch x86_64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee tests.log
+      - name: Package development app
+        run: |
+          ditto -c -k --keepParent DerivedData/Build/Products/Release/OpenEmu.app OpenEmu-development.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: network-state-development
+          path: |
+            build.log
+            tests.log
+            OpenEmu-development.zip
+          retention-days: 1
