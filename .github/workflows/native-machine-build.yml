@@ -1,0 +1,113 @@
+name: Native Apple Silicon development build
+
+on:
+  push:
+    branches: [support/network-state-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: network-state-native-machine
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: DerivedData
+          key: native-openemu-app-v1-arm-${{ github.sha }}
+          restore-keys: native-openemu-app-v1-
+      - name: Apply audio underrun fix
+        run: |
+          git -C OpenEmuKit fetch --depth=2 https://github.com/clopezadereso/OpenEmuKit.git 6e0de4f9101b08e147fb0241361306809bc6a1e4
+          git -C OpenEmuKit show --format= 6e0de4f9101b08e147fb0241361306809bc6a1e4 | git -C OpenEmuKit apply
+      - name: Backport current upstream audio availability guard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('OpenEmuKit/Source/OpenEmuHelperApp.swift')
+          source = path.read_text()
+          old = '_gameAudio = GameAudio(withCore: gameCore)'
+          assert source.count(old) == 1
+          path.write_text(source.replace(old, 'fatalError("Audio driver not supported")'))
+          PY
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Resolve removed ZIPFoundation development branch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('OpenEmu-Shaders/OpenEmuShaders.xcodeproj/project.pbxproj')
+          source = path.read_text()
+          old = 'branch = development;\n\t\t\t\tkind = branch;'
+          new = 'kind = upToNextMinorVersion;\n\t\t\t\tminimumVersion = 0.9.0;'
+          if source.count(old) != 1:
+              raise SystemExit('Expected exactly one obsolete package reference')
+          path.write_text(source.replace(old, new))
+          PY
+      - name: Build OpenEmuKit against compiled dependencies
+        run: |
+          set -o pipefail
+          test -d DerivedData/Build/Products/Release/OpenEmuShaders.framework
+          xcodebuild -project OpenEmuKit/OpenEmuKit.xcodeproj -scheme OpenEmuKit \
+            -configuration Release -sdk macosx -arch arm64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
+            build 2>&1 | tee kit-build.log
+      - name: Run metadata generator on the build host
+        run: |
+          python3 - <<'PYHOST'
+          from pathlib import Path
+          path = Path('OpenEmu/OpenEmu.xcodeproj/project.pbxproj')
+          source = path.read_text()
+          old = r'\"${BUILT_PRODUCTS_DIR}/OESystemPluginPostInstall\"'
+          new = r'xcrun swift \"${SRCROOT}/OESystemPluginPostInstall/main.swift\"'
+          assert source.count(old) == 3
+          path.write_text(source.replace(old, new))
+          PYHOST
+      - name: Build OpenEmu
+        run: |
+          set -o pipefail
+          xcodebuild -project OpenEmu/OpenEmu.xcodeproj -scheme OpenEmu \
+            -configuration Release -sdk macosx -arch arm64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
+            build 2>&1 | tee build.log
+      - name: Build matching SNES9x core
+        run: |
+          set -o pipefail
+          xcodebuild -project SNES9x/SNES9x.xcodeproj -target SNES9x \
+            -configuration Release -sdk macosx -arch arm64 \
+            SYMROOT="$PWD/DerivedData/Build/Products" \
+            OBJROOT="$PWD/DerivedData/Build/Intermediates.noindex/StandaloneCore" \
+            CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
+            build 2>&1 | tee core-build.log
+      - name: Package development app
+        run: |
+          ditto -c -k --keepParent DerivedData/Build/Products/Release/OpenEmu.app OpenEmu-development.zip
+          ditto -c -k --keepParent DerivedData/Build/Products/Release/SNES9x.oecoreplugin SNES9x-development.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: network-state-development-app
+          path: |
+            build.log
+            kit-build.log
+            core-build.log
+            SNES9x-development.zip
+            OpenEmu-development.zip
+          retention-days: 1
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: DerivedData
+          key: native-openemu-app-v1-arm-${{ github.sha }}
