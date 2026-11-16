@@ -1,0 +1,67 @@
+name: Audio buffer regression tests
+
+on:
+  push:
+    branches: [support/audio-regression-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audio-buffer-regression
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: DerivedData
+          key: native-openemu-tests-v1-${{ github.sha }}
+          restore-keys: native-openemu-tests-v1-
+      - name: Apply audio underrun fix
+        run: |
+          git -C OpenEmuKit fetch --depth=2 https://github.com/clopezadereso/OpenEmuKit.git 6e0de4f9101b08e147fb0241361306809bc6a1e4
+          git -C OpenEmuKit show --format= 6e0de4f9101b08e147fb0241361306809bc6a1e4 | git -C OpenEmuKit apply
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Resolve removed ZIPFoundation development branch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('OpenEmu-Shaders/OpenEmuShaders.xcodeproj/project.pbxproj')
+          source = path.read_text()
+          old = 'branch = development;\n\t\t\t\tkind = branch;'
+          new = 'kind = upToNextMinorVersion;\n\t\t\t\tminimumVersion = 0.9.0;'
+          if source.count(old) != 1:
+              raise SystemExit('Expected exactly one obsolete package reference')
+          path.write_text(source.replace(old, new))
+          PY
+      - name: Test OpenEmuKit
+        run: |
+          set -o pipefail
+          xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmuKit \
+            -configuration Debug -destination 'platform=macOS,arch=x86_64' \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
+            test 2>&1 | tee tests.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: network-state-development-tests
+          path: |
+            tests.log
+          retention-days: 1
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: DerivedData
+          key: native-openemu-tests-v1-${{ github.sha }}
