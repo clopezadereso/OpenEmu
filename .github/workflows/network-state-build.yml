@@ -14,6 +14,10 @@ concurrency:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [app, tests]
     runs-on: macos-15-intel
     timeout-minutes: 50
     steps:
@@ -24,8 +28,8 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: DerivedData
-          key: native-openemu-v1-${{ github.sha }}
-          restore-keys: native-openemu-v1-
+          key: native-openemu-${{ matrix.task }}-v1-${{ github.sha }}
+          restore-keys: native-openemu-${{ matrix.task }}-v1-
       - name: Apply audio underrun fix
         run: |
           git -C OpenEmuKit fetch --depth=2 https://github.com/clopezadereso/OpenEmuKit.git 6e0de4f9101b08e147fb0241361306809bc6a1e4
@@ -47,6 +51,7 @@ jobs:
           path.write_text(source.replace(old, new))
           PY
       - name: Build OpenEmu
+        if: matrix.task == 'app'
         run: |
           set -o pipefail
           xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmu \
@@ -54,6 +59,7 @@ jobs:
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee build.log
       - name: Build matching SNES9x core
+        if: matrix.task == 'app'
         run: |
           set -o pipefail
           xcodebuild -workspace OpenEmu.xcworkspace -scheme SNES9x \
@@ -61,6 +67,7 @@ jobs:
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee core-build.log
       - name: Test OpenEmuKit
+        if: matrix.task == 'tests'
         run: |
           set -o pipefail
           xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmuKit \
@@ -68,13 +75,14 @@ jobs:
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             test 2>&1 | tee tests.log
       - name: Package development app
+        if: matrix.task == 'app'
         run: |
           ditto -c -k --keepParent DerivedData/Build/Products/Release/OpenEmu.app OpenEmu-development.zip
           ditto -c -k --keepParent DerivedData/Build/Products/Release/SNES9x.oecoreplugin SNES9x-development.zip
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: network-state-development
+          name: network-state-development-${{ matrix.task }}
           path: |
             build.log
             tests.log
@@ -86,4 +94,4 @@ jobs:
         if: always()
         with:
           path: DerivedData
-          key: native-openemu-v1-${{ github.sha }}
+          key: native-openemu-${{ matrix.task }}-v1-${{ github.sha }}
