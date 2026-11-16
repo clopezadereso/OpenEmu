@@ -56,6 +56,13 @@ jobs:
               raise SystemExit('Expected exactly one obsolete package reference')
           path.write_text(source.replace(old, new))
           PY
+      - name: Test updated SDK
+        run: |
+          set -o pipefail
+          xcodebuild -project OpenEmu-SDK/OpenEmu-SDK.xcodeproj -scheme OpenEmuSystem \
+            -configuration Debug -destination 'platform=macOS,arch=x86_64' \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
+            test 2>&1 | tee sdk-tests.log
       - name: Test OpenEmuKit
         run: |
           set -o pipefail
@@ -69,6 +76,7 @@ jobs:
           name: network-state-development-tests
           path: |
             tests.log
+            sdk-tests.log
           retention-days: 1
       - uses: actions/cache/save@v4
         if: always()
