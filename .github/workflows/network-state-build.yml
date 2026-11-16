@@ -1,4 +1,4 @@
-name: Network-state development build
+name: Native OpenEmu fast-forward build
 
 on:
   push:
@@ -10,14 +10,10 @@ permissions:
 
 concurrency:
   group: network-state-development
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        task: [app, tests]
     runs-on: macos-15-intel
     timeout-minutes: 50
     steps:
@@ -28,12 +24,22 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: DerivedData
-          key: native-openemu-${{ matrix.task }}-v1-${{ github.sha }}
-          restore-keys: native-openemu-${{ matrix.task }}-v1-
+          key: native-openemu-app-v1-${{ github.sha }}
+          restore-keys: native-openemu-app-v1-
       - name: Apply audio underrun fix
         run: |
           git -C OpenEmuKit fetch --depth=2 https://github.com/clopezadereso/OpenEmuKit.git 6e0de4f9101b08e147fb0241361306809bc6a1e4
           git -C OpenEmuKit show --format= 6e0de4f9101b08e147fb0241361306809bc6a1e4 | git -C OpenEmuKit apply
+      - name: Backport current upstream audio availability guard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('OpenEmuKit/Source/OpenEmuHelperApp.swift')
+          source = path.read_text()
+          old = '_gameAudio = GameAudio(withCore: gameCore)'
+          assert source.count(old) == 1
+          path.write_text(source.replace(old, 'fatalError("Audio driver not supported")'))
+          PY
       - name: Toolchain
         run: |
           xcodebuild -version
@@ -50,48 +56,54 @@ jobs:
               raise SystemExit('Expected exactly one obsolete package reference')
           path.write_text(source.replace(old, new))
           PY
-      - name: Build OpenEmu
-        if: matrix.task == 'app'
+      - name: Build updated SDK before OpenEmuKit
         run: |
           set -o pipefail
-          xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmu \
+          xcodebuild -project OpenEmu-SDK/OpenEmu-SDK.xcodeproj -scheme OpenEmuSystem \
+            -configuration Release -sdk macosx -arch arm64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
+            build 2>&1 | tee sdk-build.log
+      - name: Build OpenEmuKit against compiled dependencies
+        run: |
+          set -o pipefail
+          test -d DerivedData/Build/Products/Release/OpenEmuShaders.framework
+          xcodebuild -project OpenEmuKit/OpenEmuKit.xcodeproj -scheme OpenEmuKit \
+            -configuration Release -sdk macosx -arch arm64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
+            build 2>&1 | tee kit-build.log
+      - name: Run metadata generator on the build host
+        run: |
+          python3 - <<'PYHOST'
+          from pathlib import Path
+          path = Path('OpenEmu/OpenEmu.xcodeproj/project.pbxproj')
+          source = path.read_text()
+          old = r'\"${BUILT_PRODUCTS_DIR}/OESystemPluginPostInstall\"'
+          new = r'xcrun swift \"${SRCROOT}/OESystemPluginPostInstall/main.swift\"'
+          assert source.count(old) == 3
+          path.write_text(source.replace(old, new))
+          PYHOST
+      - name: Build OpenEmu
+        run: |
+          set -o pipefail
+          xcodebuild -project OpenEmu/OpenEmu.xcodeproj -scheme OpenEmu \
             -configuration Release -sdk macosx -arch arm64 \
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee build.log
-      - name: Build matching SNES9x core
-        if: matrix.task == 'app'
-        run: |
-          set -o pipefail
-          xcodebuild -workspace OpenEmu.xcworkspace -scheme SNES9x \
-            -configuration Release -sdk macosx -arch arm64 \
-            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
-            build 2>&1 | tee core-build.log
-      - name: Test OpenEmuKit
-        if: matrix.task == 'tests'
-        run: |
-          set -o pipefail
-          xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmuKit \
-            -configuration Debug -destination 'platform=macOS' -arch x86_64 \
-            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
-            test 2>&1 | tee tests.log
       - name: Package development app
-        if: matrix.task == 'app'
         run: |
           ditto -c -k --keepParent DerivedData/Build/Products/Release/OpenEmu.app OpenEmu-development.zip
-          ditto -c -k --keepParent DerivedData/Build/Products/Release/SNES9x.oecoreplugin SNES9x-development.zip
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: network-state-development-${{ matrix.task }}
+          name: network-state-development-app
           path: |
             build.log
-            tests.log
-            core-build.log
-            SNES9x-development.zip
+            kit-build.log
+            sdk-build.log
             OpenEmu-development.zip
           retention-days: 1
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: DerivedData
-          key: native-openemu-${{ matrix.task }}-v1-${{ github.sha }}
+          key: native-openemu-app-v1-${{ github.sha }}

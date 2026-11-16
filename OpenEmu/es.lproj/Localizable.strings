@@ -676,3 +676,13 @@
 "Are you sure you want to delete the shader preset called '%@'?" = "Are you sure you want to delete the shader preset called '%@'?";
 
 "Delete Shader Preset" = "Delete Shader Preset";
+
+"Fast Forward Speed" = "Velocidad de avance rápido";
+
+"Unlimited" = "Sin límite";
+
+"%d×" = "%d×";
+
+"Mute Sound While Fast-Forwarding" = "Silenciar durante el avance rápido";
+
+"Fast Forward Key Toggles On/Off" = "Alternar avance rápido con la tecla";
