@@ -1,21 +1,28 @@
-name: Native OpenEmu fast-forward build
+name: Native OpenEmu shared build
 
 on:
-  push:
-    branches: [support/network-state-build]
   workflow_dispatch:
+    inputs:
+      architecture:
+        description: Native processor architecture
+        required: true
+        default: arm64
+        type: choice
+        options: [arm64, x86_64]
 
 permissions:
   contents: read
 
 concurrency:
-  group: network-state-development
+  group: network-state-development-${{ inputs.architecture }}
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: macos-15-intel
     timeout-minutes: 50
+    env:
+      BUILD_ARCH: ${{ inputs.architecture }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,8 +31,10 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: DerivedData
-          key: native-openemu-app-v1-${{ github.sha }}
-          restore-keys: native-openemu-app-v1-
+          key: native-openemu-app-v2-${{ inputs.architecture }}-${{ github.sha }}
+          restore-keys: |
+            native-openemu-app-v2-${{ inputs.architecture }}-
+            native-openemu-app-v1-
       - name: Apply audio underrun fix
         run: |
           git -C OpenEmuKit fetch --depth=2 https://github.com/clopezadereso/OpenEmuKit.git 6e0de4f9101b08e147fb0241361306809bc6a1e4
@@ -56,11 +65,18 @@ jobs:
               raise SystemExit('Expected exactly one obsolete package reference')
           path.write_text(source.replace(old, new))
           PY
+      - name: Build shaders for the selected architecture
+        run: |
+          set -o pipefail
+          xcodebuild -project OpenEmu-Shaders/OpenEmuShaders.xcodeproj -scheme OpenEmuShaders \
+            -configuration Release -sdk macosx -arch "$BUILD_ARCH" -jobs 2 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
+            build 2>&1 | tee shaders-build.log
       - name: Build updated SDK before OpenEmuKit
         run: |
           set -o pipefail
           xcodebuild -project OpenEmu-SDK/OpenEmu-SDK.xcodeproj -scheme OpenEmuSystem \
-            -configuration Release -sdk macosx -arch arm64 \
+            -configuration Release -sdk macosx -arch "$BUILD_ARCH" \
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee sdk-build.log
       - name: Build OpenEmuKit against compiled dependencies
@@ -68,7 +84,7 @@ jobs:
           set -o pipefail
           test -d DerivedData/Build/Products/Release/OpenEmuShaders.framework
           xcodebuild -project OpenEmuKit/OpenEmuKit.xcodeproj -scheme OpenEmuKit \
-            -configuration Release -sdk macosx -arch arm64 \
+            -configuration Release -sdk macosx -arch "$BUILD_ARCH" \
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee kit-build.log
       - name: Run metadata generator on the build host
@@ -86,24 +102,29 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project OpenEmu/OpenEmu.xcodeproj -scheme OpenEmu \
-            -configuration Release -sdk macosx -arch arm64 \
+            -configuration Release -sdk macosx -arch "$BUILD_ARCH" \
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee build.log
       - name: Package development app
         run: |
           ditto -c -k --keepParent DerivedData/Build/Products/Release/OpenEmu.app OpenEmu-development.zip
+          git rev-parse HEAD > source-revision.txt
+          printf '%s\n' "$BUILD_ARCH" > architecture.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: network-state-development-app
+          name: network-state-development-app-${{ inputs.architecture }}
           path: |
             build.log
             kit-build.log
             sdk-build.log
+            shaders-build.log
+            source-revision.txt
+            architecture.txt
             OpenEmu-development.zip
           retention-days: 1
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: DerivedData
-          key: native-openemu-app-v1-${{ github.sha }}
+          key: native-openemu-app-v2-${{ inputs.architecture }}-${{ github.sha }}
