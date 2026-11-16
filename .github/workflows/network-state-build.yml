@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
@@ -41,19 +41,27 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmu \
-            -configuration Release -sdk macosx -arch x86_64 \
-            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO \
+            -configuration Release -sdk macosx -arch arm64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO \
             build 2>&1 | tee build.log
+      - name: Build matching SNES9x core
+        run: |
+          set -o pipefail
+          xcodebuild -workspace OpenEmu.xcworkspace -scheme SNES9x \
+            -configuration Release -sdk macosx -arch arm64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            build 2>&1 | tee core-build.log
       - name: Test OpenEmuKit
         run: |
           set -o pipefail
           xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmuKit \
-            -configuration Debug -destination 'platform=macOS' -arch x86_64 \
-            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO \
+            -configuration Debug -destination 'platform=macOS' -arch arm64 \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO \
             test 2>&1 | tee tests.log
       - name: Package development app
         run: |
           ditto -c -k --keepParent DerivedData/Build/Products/Release/OpenEmu.app OpenEmu-development.zip
+          ditto -c -k --keepParent DerivedData/Build/Products/Release/SNES9x.oecoreplugin SNES9x-development.zip
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -61,5 +69,7 @@ jobs:
           path: |
             build.log
             tests.log
+            core-build.log
+            SNES9x-development.zip
             OpenEmu-development.zip
           retention-days: 1
