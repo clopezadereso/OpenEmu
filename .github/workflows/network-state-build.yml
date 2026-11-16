@@ -51,21 +51,21 @@ jobs:
           set -o pipefail
           xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmu \
             -configuration Release -sdk macosx -arch arm64 \
-            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee build.log
       - name: Build matching SNES9x core
         run: |
           set -o pipefail
           xcodebuild -workspace OpenEmu.xcworkspace -scheme SNES9x \
             -configuration Release -sdk macosx -arch arm64 \
-            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee core-build.log
       - name: Test OpenEmuKit
         run: |
           set -o pipefail
           xcodebuild -workspace OpenEmu.xcworkspace -scheme OpenEmuKit \
             -configuration Debug -destination 'platform=macOS' -arch x86_64 \
-            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             test 2>&1 | tee tests.log
       - name: Package development app
         run: |
