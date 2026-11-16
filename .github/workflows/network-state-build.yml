@@ -64,6 +64,17 @@ jobs:
             -configuration Release -sdk macosx -arch arm64 \
             -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO MACOSX_DEPLOYMENT_TARGET=12.0 \
             build 2>&1 | tee kit-build.log
+      - name: Run metadata generator on the build host
+        run: |
+          python3 - <<'PYHOST'
+          from pathlib import Path
+          path = Path('OpenEmu/OpenEmu.xcodeproj/project.pbxproj')
+          source = path.read_text()
+          old = r'\"${BUILT_PRODUCTS_DIR}/OESystemPluginPostInstall\"'
+          new = r'xcrun swift \"${SRCROOT}/OESystemPluginPostInstall/main.swift\"'
+          assert source.count(old) == 3
+          path.write_text(source.replace(old, new))
+          PYHOST
       - name: Build OpenEmu
         run: |
           set -o pipefail
